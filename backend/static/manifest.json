@@ -1,0 +1,9 @@
+{
+  "name": "Cascina Nascosta - Timbrature",
+  "short_name": "Timbrature",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f3dc",
+  "theme_color": "#65ad3f",
+  "icons": []
+}
