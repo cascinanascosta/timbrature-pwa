@@ -71,12 +71,10 @@ class EditLog(Base):
 
 Base.metadata.create_all(engine)
 
-
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 310_000)
     return f"pbkdf2_sha256$310000${salt.hex()}${digest.hex()}"
-
 
 def verify_password(password: str, stored: str) -> bool:
     try:
@@ -88,31 +86,48 @@ def verify_password(password: str, stored: str) -> bool:
     except Exception:
         return False
 
-
 def token_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
-
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
-
 def ensure_seed_users():
+    seeds = [
+        ("Amministratore", "admin", "admin123", "admin"),
+        ("Dipendente Demo", "demo", "demo123", "employee"),
+        ("Jacopo", "jacopo", "1111", "employee"),
+        ("Della", "della", "1234", "employee"),
+    ]
     with Session(engine) as s:
-        if s.scalar(select(User).where(User.username == "admin")) is None:
-            s.add(User(name="Amministratore", username="admin", password_hash=hash_password("admin123"), role="admin"))
-        if s.scalar(select(User).where(User.username == "demo")) is None:
-            s.add(User(name="Dipendente Demo", username="demo", password_hash=hash_password("demo123"), role="employee"))
-        s.commit()
+        changed = False
+        for name, username, password, role in seeds:
+            user = s.scalar(select(User).where(User.username == username))
+            if user is None:
+                s.add(User(name=name, username=username, password_hash=hash_password(password), role=role))
+                changed = True
+            else:
+                # Mantiene eventuali utenti già presenti, ma aggiorna nome/ruolo dei due dipendenti demo.
+                if username in ("jacopo", "della"):
+                    user.name = name
+                    user.role = role
+                    user.active = True
+        if changed:
+            s.commit()
+        else:
+            s.commit()
 
 ensure_seed_users()
 
-app = FastAPI(title="Timbrature PWA", version="0.3-render")
+app = FastAPI(title="Timbrature PWA", version="1.0-cascina")
 SESSIONS: dict[str, dict] = {}
 
 class Login(BaseModel):
     username: str
     password: str
+
+class PinLogin(BaseModel):
+    pin: str
 
 class PunchRequest(BaseModel):
     token: str
@@ -122,7 +137,6 @@ class UserIn(BaseModel):
     username: str
     password: str
     role: str = "employee"
-
 
 def current(session: str) -> dict:
     user = SESSIONS.get(session)
@@ -134,15 +148,31 @@ def current(session: str) -> dict:
 def health():
     return {"ok": True, "time": now_utc().isoformat()}
 
+def create_session(user: User):
+    sid = secrets.token_urlsafe(32)
+    SESSIONS[sid] = {"id": user.id, "name": user.name, "role": user.role}
+    return {"session": sid, "name": user.name, "role": user.role}
+
 @app.post("/api/login")
 def login(req: Login):
     with Session(engine) as s:
         user = s.scalar(select(User).where(User.username == req.username, User.active.is_(True)))
         if user is None or not verify_password(req.password, user.password_hash):
             raise HTTPException(401, "Credenziali non valide")
-        sid = secrets.token_urlsafe(32)
-        SESSIONS[sid] = {"id": user.id, "name": user.name, "role": user.role}
-        return {"session": sid, "name": user.name, "role": user.role}
+        return create_session(user)
+
+@app.post("/api/login-pin")
+def login_pin(req: PinLogin):
+    pin = req.pin.strip()
+    if not pin:
+        raise HTTPException(400, "Inserisci il PIN")
+    with Session(engine) as s:
+        # PIN/password dei dipendenti: vengono verificati contro il campo password_hash.
+        employees = s.scalars(select(User).where(User.role == "employee", User.active.is_(True))).all()
+        user = next((u for u in employees if verify_password(pin, u.password_hash)), None)
+        if user is None:
+            raise HTTPException(401, "PIN non valido")
+        return create_session(user)
 
 @app.post("/api/qr")
 def new_qr():
@@ -191,8 +221,11 @@ def punch(req: PunchRequest, session: str):
         s.add(Punch(user_id=user["id"], ts=now, kind=kind, qr_token_hash=token_hash(req.token)))
         qr.used = True
         s.commit()
-    return {"kind": kind, "timestamp": now.astimezone(TZ).strftime("%d/%m/%Y %H:%M:%S"), "name": user["name"]}
-
+    return {
+        "kind": kind,
+        "timestamp": now.astimezone(TZ).strftime("%d/%m/%Y %H:%M:%S"),
+        "name": user["name"]
+    }
 
 def previous_month_visible():
     now = datetime.now(TZ)
@@ -217,8 +250,21 @@ def my_punches(session: str):
         return {"visible": False, "punches": []}
     start, end, month = visible
     with Session(engine) as s:
-        rows = s.scalars(select(Punch).where(Punch.user_id == user["id"], Punch.ts >= start, Punch.ts < end).order_by(Punch.ts)).all()
-    return {"visible": True, "month": month, "punches": [{"ts": p.ts.astimezone(TZ).strftime("%d/%m/%Y %H:%M:%S"), "kind": p.kind} for p in rows]}
+        rows = s.scalars(
+            select(Punch).where(
+                Punch.user_id == user["id"],
+                Punch.ts >= start,
+                Punch.ts < end
+            ).order_by(Punch.ts)
+        ).all()
+    return {
+        "visible": True,
+        "month": month,
+        "punches": [
+            {"ts": p.ts.astimezone(TZ).strftime("%d/%m/%Y %H:%M:%S"), "kind": p.kind}
+            for p in rows
+        ]
+    }
 
 @app.get("/api/admin/punches")
 def admin_punches(session: str):
@@ -226,8 +272,16 @@ def admin_punches(session: str):
     if user["role"] != "admin":
         raise HTTPException(403, "Admin richiesto")
     with Session(engine) as s:
-        rows = s.execute(select(Punch, User.name).join(User, User.id == Punch.user_id).order_by(Punch.ts.desc()).limit(1000)).all()
-    return [{"id": p.id, "name": name, "ts": p.ts.astimezone(TZ).isoformat(), "kind": p.kind, "edited": p.edited} for p, name in rows]
+        rows = s.execute(
+            select(Punch, User.name)
+            .join(User, User.id == Punch.user_id)
+            .order_by(Punch.ts.desc())
+            .limit(1000)
+        ).all()
+    return [
+        {"id": p.id, "name": name, "ts": p.ts.astimezone(TZ).isoformat(), "kind": p.kind, "edited": p.edited}
+        for p, name in rows
+    ]
 
 @app.get("/api/admin/users")
 def users(session: str):
@@ -236,7 +290,10 @@ def users(session: str):
         raise HTTPException(403, "Admin richiesto")
     with Session(engine) as s:
         rows = s.scalars(select(User).order_by(User.name)).all()
-    return [{"id": u.id, "name": u.name, "username": u.username, "role": u.role, "active": u.active} for u in rows]
+    return [
+        {"id": u.id, "name": u.name, "username": u.username, "role": u.role, "active": u.active}
+        for u in rows
+    ]
 
 @app.post("/api/admin/users")
 def create_user(req: UserIn, session: str):
@@ -248,7 +305,12 @@ def create_user(req: UserIn, session: str):
     with Session(engine) as s:
         if s.scalar(select(User).where(User.username == req.username)) is not None:
             raise HTTPException(400, "Username già esistente")
-        s.add(User(name=req.name, username=req.username, password_hash=hash_password(req.password), role=req.role))
+        s.add(User(
+            name=req.name,
+            username=req.username,
+            password_hash=hash_password(req.password),
+            role=req.role
+        ))
         s.commit()
     return {"ok": True}
 
