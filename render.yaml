@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: timbrature-cascina-demo
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.2
+      - key: DATABASE_URL
+        fromDatabase:
+          name: timbrature-demo-db
+          property: connectionString
+
+databases:
+  - name: timbrature-demo-db
+    plan: free
+    region: frankfurt
