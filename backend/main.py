@@ -175,7 +175,7 @@ def employee_page(request: Request, db: Session = Depends(db)):
       <a class="button" href="/employee/history">Vedi storico</a>
     </div>
     <script>
-      function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('it-IT',{{hour:'2-digit',minute:'2-digit',second:'2-digit'}});}
+      function tick(){{document.getElementById('clock').textContent=new Date().toLocaleTimeString('it-IT',{{hour:'2-digit',minute:'2-digit',second:'2-digit'}});}}
       tick(); setInterval(tick,1000);
     </script>
     """)
