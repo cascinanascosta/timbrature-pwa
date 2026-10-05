@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: timbrature-pwa
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: TZ
+        value: Europe/Rome
+      - key: PYTHON_VERSION
+        value: 3.13.11
