@@ -1,0 +1,39 @@
+
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Area dipendente — Cascina</title><link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="cream">
+<div class="topbar"><a href="/" class="brand">CASCINA<br><span>NASCOSTA</span></a><div class="nav">AREA DIPENDENTE</div></div>
+<main class="container">
+<section id="loginCard" class="card narrow">
+<h2>Area dipendente</h2><p>Inserisci il nome e il PIN assegnato dal back office.</p>
+<form id="loginForm">
+<label>Dipendente<input name="name" required autocomplete="username"></label>
+<label>PIN<input name="pin" type="password" inputmode="numeric" required autocomplete="current-password"></label>
+<button class="btn primary">ACCEDI</button>
+</form><div id="loginMsg" class="msg"></div>
+</section>
+<section id="workCard" class="card hidden">
+<div class="row between"><div><div class="eyebrow">BENVENUTO</div><h2 id="hello"></h2><div id="team" class="tag"></div></div><button id="logout" class="btn small">ESCI</button></div>
+<div class="clock" id="clock">--:--</div>
+<div class="today" id="today"></div>
+<button id="punch" class="btn primary big">TIMBRA</button>
+<div id="punchMsg" class="msg"></div>
+</section>
+</main>
+<script>
+let me=null;
+const $=s=>document.querySelector(s);
+function tick(){ $('#clock').textContent=new Date().toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+setInterval(tick,1000); tick();
+async function loadToday(){ if(!me)return; const r=await fetch('/api/today/'+me.id); const d=await r.json(); $('#today').innerHTML=`<b>${d.date}</b><br>Entrata: ${d.entry1||'—'} &nbsp; Uscita: ${d.exit1||'—'}<br>${d.entry2?'Secondo turno: '+d.entry2+' — '+(d.exit2||'—'):''}<br><strong>Totale: ${d.total}</strong>`; }
+$('#loginForm').onsubmit=async e=>{e.preventDefault();let f=new FormData(e.target);let r=await fetch('/api/employee/login',{method:'POST',body:f});let d=await r.json();if(!r.ok){$('#loginMsg').textContent=d.detail||'Credenziali non valide';return}me=d;sessionStorage.setItem('cascina_me',JSON.stringify(me));show();};
+function show(){ $('#loginCard').classList.add('hidden');$('#workCard').classList.remove('hidden');$('#hello').textContent=me.name;$('#team').textContent=me.team||'';loadToday();}
+const saved=sessionStorage.getItem('cascina_me');if(saved){try{me=JSON.parse(saved);show()}catch{}}
+$('#logout').onclick=()=>{sessionStorage.removeItem('cascina_me');location.reload()};
+$('#punch').onclick=async()=>{let f=new FormData();f.append('pin', prompt('Inserisci il tuo PIN per confermare la timbratura')||'');let r=await fetch('/api/punch/'+me.id,{method:'POST',body:f});let d=await r.json();$('#punchMsg').textContent=r.ok?`${d.action.toUpperCase()} registrata alle ${d.time} — Totale ${d.total}`:(d.detail||'Errore');loadToday();};
+</script>
+</body></html>

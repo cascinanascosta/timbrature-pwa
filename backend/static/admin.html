@@ -1,0 +1,48 @@
+
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Back office — Cascina</title><link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="cream">
+<div class="topbar"><a href="/" class="brand">CASCINA<br><span>NASCOSTA</span></a><div class="nav">BACK OFFICE</div></div>
+<main class="container">
+<section id="adminLogin" class="card narrow"><h2>Back office</h2><p>PIN amministratore</p><form id="aform"><input name="pin" type="password" inputmode="numeric" required><button class="btn primary">ENTRA</button></form><div id="amsg" class="msg"></div></section>
+<section id="panel" class="hidden">
+<div class="grid2">
+<div class="card"><h3>Nuovo dipendente</h3><form id="newEmp">
+<label>Nome<input name="name" required></label><label>PIN<input name="pin" required></label><label>Team<select name="team_id" id="teamSelect"></select></label><button class="btn primary">AGGIUNGI</button>
+</form></div>
+<div class="card"><h3>Nuovo team</h3><form id="newTeam"><label>Nome team<input name="name" required></label><button class="btn">CREA TEAM</button></form></div>
+</div>
+<div class="card"><div class="row between"><h2>Dipendenti</h2><button class="btn small" onclick="loadAll()">AGGIORNA</button></div><div id="emps"></div></div>
+<div class="card"><h2>Inserisci / correggi giornata</h2><form id="entryForm" class="gridForm">
+<label>Dipendente<select name="employee_id" id="entryEmp"></select></label><label>Data<input name="work_date" type="date" required></label>
+<label>Entrata 1<input name="entry1" type="time"></label><label>Uscita 1<input name="exit1" type="time"></label>
+<label>Entrata 2<input name="entry2" type="time"></label><label>Uscita 2<input name="exit2" type="time"></label>
+<button class="btn primary">SALVA GIORNATA</button></form><div id="entryMsg" class="msg"></div></div>
+<div class="card"><h2>Esportazione mensile</h2>
+<div class="gridForm"><label>Mese<input id="month" type="month"></label><label>Filtro<select id="filter"><option value="all">Tutti</option><option value="employee">Singolo dipendente</option><option value="team">Team</option></select></label><label id="personWrap">Dipendente<select id="person"></select></label><label id="teamWrap">Team<select id="team"></select></label></div>
+<div class="actions"><button class="btn" onclick="preview()">VISUALIZZA</button><button class="btn primary" onclick="downloadXlsx()">SCARICA EXCEL</button></div>
+<div id="report"></div></div>
+</section>
+</main>
+<script>
+let APIN='', employees=[], teams=[];
+const $=s=>document.querySelector(s);
+function fd(o){let f=new FormData();for(const [k,v] of Object.entries(o))f.append(k,v);return f}
+$('#aform').onsubmit=async e=>{e.preventDefault();APIN=new FormData(e.target).get('pin');let r=await fetch('/api/admin/login',{method:'POST',body:fd({pin:APIN})});let d=await r.json();if(!r.ok){$('#amsg').textContent=d.detail||'PIN non valido';return}$('#adminLogin').classList.add('hidden');$('#panel').classList.remove('hidden');$('#month').value=new Date().toISOString().slice(0,7);loadAll();}
+async function loadAll(){teams=await (await fetch('/api/teams')).json();employees=await (await fetch('/api/employees')).json();render();}
+function render(){ $('#teamSelect').innerHTML=teams.filter(x=>x.active).map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('#team').innerHTML=teams.filter(x=>x.active).map(x=>`<option value="${x.id}">${x.name}</option>`).join('');$('#person,#entryEmp').innerHTML=employees.filter(x=>x.active).map(x=>`<option value="${x.id}">${x.name} — ${x.team||''}</option>`).join('');$('#emps').innerHTML=employees.map(e=>`<div class="empRow"><b>${e.name}</b><span>${e.team||'—'}</span><span>PIN: ${e.pin}</span><button class="btn tiny" onclick="editEmp(${e.id})">MODIFICA</button><button class="btn tiny danger" onclick="disableEmp(${e.id})">DISATTIVA</button></div>`).join('');}
+$('#newEmp').onsubmit=async e=>{e.preventDefault();let o=Object.fromEntries(new FormData(e.target));o.admin_pin=APIN;let r=await fetch('/api/employees',{method:'POST',body:fd(o)});let d=await r.json();if(!r.ok){alert(d.detail);return}e.target.reset();await loadAll();};
+$('#newTeam').onsubmit=async e=>{e.preventDefault();let o=Object.fromEntries(new FormData(e.target));o.pin=APIN;let r=await fetch('/api/teams',{method:'POST',body:fd(o)});let d=await r.json();if(!r.ok){alert(d.detail);return}e.target.reset();await loadAll();};
+async function disableEmp(id){if(!confirm('Disattivare questo dipendente?'))return;let r=await fetch('/api/employees/'+id+'?pin='+encodeURIComponent(APIN),{method:'DELETE'});if(!r.ok)alert((await r.json()).detail);loadAll();}
+async function editEmp(id){let e=employees.find(x=>x.id===id);let name=prompt('Nome',e.name);if(name===null)return;let pin=prompt('PIN',e.pin);if(pin===null)return;let team=prompt('ID team ('+teams.map(x=>x.id+': '+x.name).join(', ')+')',e.team_id);if(team===null)return;let o={name,pin,team_id:team,active:'true',admin_pin:APIN};let r=await fetch('/api/employees/'+id,{method:'PUT',body:fd(o)});if(!r.ok)alert((await r.json()).detail);loadAll();}
+$('#entryForm').onsubmit=async e=>{e.preventDefault();let o=Object.fromEntries(new FormData(e.target));o.admin_pin=APIN;let r=await fetch('/api/admin/entry',{method:'POST',body:fd(o)});let d=await r.json();$('#entryMsg').textContent=r.ok?`Salvato. Totale: ${d.total}`:(d.detail||'Errore');};
+function params(){let p=new URLSearchParams({month:$('#month').value,admin_pin:APIN});if($('#filter').value==='employee')p.set('employee_id',$('#person').value);if($('#filter').value==='team')p.set('team_id',$('#team').value);return p;}
+async function preview(){let r=await fetch('/api/report?'+params());let d=await r.json();if(!r.ok){alert(d.detail);return}$('#report').innerHTML='<table><tr><th>Data</th><th>Dipendente</th><th>Team</th><th>E1</th><th>U1</th><th>E2</th><th>U2</th><th>Totale</th></tr>'+d.map(x=>`<tr><td>${x.date}</td><td>${x.employee}</td><td>${x.team}</td><td>${x.entry1||''}</td><td>${x.exit1||''}</td><td>${x.entry2||''}</td><td>${x.exit2||''}</td><td><b>${x.total}</b></td></tr>`).join('')+'</table>';}
+function downloadXlsx(){location.href='/api/export.xlsx?'+params();}
+$('#filter').onchange=()=>{let v=$('#filter').value;$('#personWrap').style.display=v==='employee'?'block':'none';$('#teamWrap').style.display=v==='team'?'block':'none';};$('#filter').dispatchEvent(new Event('change'));
+</script>
+</body></html>
